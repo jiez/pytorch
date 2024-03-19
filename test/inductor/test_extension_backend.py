@@ -103,10 +103,6 @@ class ExtensionBackendTests(TestCase):
         torch.utils.rename_privateuse1_backend("extension_device")
         torch._register_device_module('extension_device', self.module)
 
-        def _lazy_init():
-            return
-        setattr(torch.extension_device, "_lazy_init", _lazy_init)
-
         register_backend_for_device(
             "extension_device", ExtensionScheduling, ExtensionWrapperCodegen
         )
