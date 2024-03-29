@@ -28,7 +28,8 @@ void device_lazy_init(at::DeviceType device_type) {
   }
 
   if (device_type == at::DeviceType::PrivateUse1) {
-    auto has_lazy_init_method = PyObject_HasAttrString(module.get(), "_lazy_init") == 1;
+    auto has_lazy_init_method =
+        PyObject_HasAttrString(module.get(), "_lazy_init") == 1;
     if (!has_lazy_init_method) {
       return;
     }
