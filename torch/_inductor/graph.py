@@ -323,6 +323,8 @@ class GraphLowering(torch.fx.Interpreter):
         )
         self.init_backend_registration()
 
+        self.effectful_ops: Dict[Any, ir.Buffer] = {}
+
     @staticmethod
     def decide_layout_opt(gm, *, is_inference) -> bool:
         """
@@ -625,7 +627,10 @@ class GraphLowering(torch.fx.Interpreter):
         self.buffers.append(buffer)
         self.name_to_buffer[name] = buffer
         # Skip empty CPU tensor so that CUDA graphs can succeed, see https://github.com/pytorch/pytorch/pull/114144
-        if not isinstance(buffer, ir.ComputedBuffer) or not buffer.is_zero_elements():
+        if (
+            not (isinstance(buffer, ir.ComputedBuffer) and buffer.is_zero_elements())
+            and buffer.get_device() is not None
+        ):
             self.add_device_info(buffer.get_device())
         return name
 
@@ -760,6 +765,7 @@ class GraphLowering(torch.fx.Interpreter):
                 FixedLayout(example.device, example.dtype, sizes, strides),
             )
         )
+
         self.graph_inputs[target] = tensor
         self.graph_inputs_original[target] = tensor.data.data
         self.add_device_info(example.device)
@@ -873,6 +879,7 @@ class GraphLowering(torch.fx.Interpreter):
             # nested subgraphs can have singleton outputs
             result = (result,)
         assert isinstance(result, (tuple, list)), type(result)
+
         assert all(
             isinstance(
                 x,
@@ -884,6 +891,7 @@ class GraphLowering(torch.fx.Interpreter):
                     sympy.Expr,
                     sympy.logic.boolalg.Boolean,
                     int,
+                    ir.EffectfulKernel,
                 ),
             )
             for x in result
@@ -908,6 +916,7 @@ class GraphLowering(torch.fx.Interpreter):
                 )
 
         self.graph_outputs = result_correct_strides
+
         value: ir.IRNode
         for name, value in self.graph_inputs.items():
             assert isinstance(
