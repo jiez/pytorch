@@ -123,9 +123,9 @@ class OnnxRegistry:
         # NOTE: _registry is the registry maps OpNameto a list of ONNXFunctions. It is important
         # not to directly modify this variable. Instead, access to it should be done through
         # the public methods: register_custom_op, get_ops, and is_registered_op.
-        self._registry: Dict[
-            registration.OpName, List[registration.ONNXFunction]
-        ] = defaultdict(list)
+        self._registry: Dict[registration.OpName, List[registration.ONNXFunction]] = (
+            defaultdict(list)
+        )
         # FIXME: Avoid importing onnxscript into torch
         from onnxscript.function_libs.torch_lib import (  # type: ignore[import]  # noqa: F401
             registration,
@@ -344,7 +344,9 @@ class ResolvedExportOptions(ExportOptions):
     decomposition_table: Dict[torch._ops.OpOverload, Callable]
     """A dictionary that maps operators to their decomposition functions."""
 
-    onnxfunction_dispatcher: torch.onnx._internal.fx.onnxfunction_dispatcher.OnnxFunctionDispatcher
+    onnxfunction_dispatcher: (
+        torch.onnx._internal.fx.onnxfunction_dispatcher.OnnxFunctionDispatcher
+    )
     """The ONNX dispatcher used to dispatch ATen operators to ONNX functions."""
 
     fx_tracer: FXGraphExtractor
@@ -614,9 +616,9 @@ class ONNXRuntimeOptions:
     session_options: Optional[Sequence["onnxruntime.SessionOptions"]] = None
     """ONNX Runtime session options."""
 
-    execution_providers: Optional[
-        Sequence[Union[str, Tuple[str, Dict[Any, Any]]]]
-    ] = None
+    execution_providers: Optional[Sequence[Union[str, Tuple[str, Dict[Any, Any]]]]] = (
+        None
+    )
     """ONNX Runtime execution providers to use during model execution."""
 
     execution_provider_options: Optional[Sequence[Dict[Any, Any]]] = None
@@ -785,6 +787,7 @@ class ONNXProgram:
             the last 2 inputs are user inputs (namely x and b).
             The first output is a buffer mutation (namely my_buffer2) and the last output is the actual model output.
 
+            >>> import pprint
             >>> class CustomModule(torch.nn.Module):
             ...     def __init__(self):
             ...         super().__init__()
@@ -813,31 +816,45 @@ class ONNXProgram:
             >>> inputs = (torch.rand((64, 1, 28, 28), dtype=torch.float32), torch.randn(3))
             >>> exported_program = torch.export.export(CustomModule(), args=inputs)
             >>> onnx_program = torch.onnx.dynamo_export(exported_program, *inputs)
-            >>> print(onnx_program.model_signature)
-            ExportGraphSignature(
-                input_specs=[
-                    InputSpec(kind=<InputKind.PARAMETER: 2>, arg=TensorArgument(name='arg0_1'),
-                              target='conv1.weight', persistent=None),
-                    InputSpec(kind=<InputKind.PARAMETER: 2>, arg=TensorArgument(name='arg1_1'),
-                              target='conv2.weight', persistent=None),
-                    InputSpec(kind=<InputKind.PARAMETER: 2>, arg=TensorArgument(name='arg2_1'),
-                              target='fc1.weight', persistent=None),
-                    InputSpec(kind=<InputKind.PARAMETER: 2>, arg=TensorArgument(name='arg3_1'),
-                              target='fc2.weight', persistent=None),
-                    InputSpec(kind=<InputKind.BUFFER: 3>, arg=TensorArgument(name='arg4_1'),
-                              target='my_buffer2', persistent=True),
-                    InputSpec(kind=<InputKind.BUFFER: 3>, arg=TensorArgument(name='arg5_1'),
-                              target='my_buffer1', persistent=True),
-                    InputSpec(kind=<InputKind.USER_INPUT: 1>, arg=TensorArgument(name='arg6_1'),
-                              target=None, persistent=None),
-                    InputSpec(kind=<InputKind.USER_INPUT: 1>, arg=TensorArgument(name='arg7_1'),
-                              target=None, persistent=None)
-                ],
-                output_specs=[
-                    OutputSpec(kind=<OutputKind.BUFFER_MUTATION: 3>, arg=TensorArgument(name='add'), target='my_buffer2'),
-                    OutputSpec(kind=<OutputKind.USER_OUTPUT: 1>, arg=TensorArgument(name='_log_softmax'), target=None)
-                ]
-            )
+            >>> pprint.pprint(onnx_program.model_signature)
+            ExportGraphSignature(input_specs=[InputSpec(kind=<InputKind.PARAMETER: 2>,
+                                                  arg=TensorArgument(name='p_conv1_weight'),
+                                                  target='conv1.weight',
+                                                  persistent=None),
+                                        InputSpec(kind=<InputKind.PARAMETER: 2>,
+                                                  arg=TensorArgument(name='p_conv2_weight'),
+                                                  target='conv2.weight',
+                                                  persistent=None),
+                                        InputSpec(kind=<InputKind.PARAMETER: 2>,
+                                                  arg=TensorArgument(name='p_fc1_weight'),
+                                                  target='fc1.weight',
+                                                  persistent=None),
+                                        InputSpec(kind=<InputKind.PARAMETER: 2>,
+                                                  arg=TensorArgument(name='p_fc2_weight'),
+                                                  target='fc2.weight',
+                                                  persistent=None),
+                                        InputSpec(kind=<InputKind.BUFFER: 3>,
+                                                  arg=TensorArgument(name='b_my_buffer2'),
+                                                  target='my_buffer2',
+                                                  persistent=True),
+                                        InputSpec(kind=<InputKind.BUFFER: 3>,
+                                                  arg=TensorArgument(name='b_my_buffer1'),
+                                                  target='my_buffer1',
+                                                  persistent=True),
+                                        InputSpec(kind=<InputKind.USER_INPUT: 1>,
+                                                  arg=TensorArgument(name='x'),
+                                                  target=None,
+                                                  persistent=None),
+                                        InputSpec(kind=<InputKind.USER_INPUT: 1>,
+                                                  arg=TensorArgument(name='b'),
+                                                  target=None,
+                                                  persistent=None)],
+                           output_specs=[OutputSpec(kind=<OutputKind.BUFFER_MUTATION: 3>,
+                                                    arg=TensorArgument(name='add'),
+                                                    target='my_buffer2'),
+                                         OutputSpec(kind=<OutputKind.USER_OUTPUT: 1>,
+                                                    arg=TensorArgument(name='_log_softmax'),
+                                                    target=None)])
         """
 
         return self._model_signature
