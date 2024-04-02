@@ -478,8 +478,9 @@ def sink_cat_after_pointwise(module: torch.fx.GraphModule) -> torch.fx.GraphModu
                     return tensors, dim
 
                 tensors, dim = cat_args(*node.args, **node.kwargs)
+                new_kwargs = { x: user.kwargs[x] for x in user.kwargs if x != "input"}
                 new_tensors = [
-                    g.create_node(user.op, user.target, args=(arg,), kwargs=user.kwargs)
+                    g.create_node(user.op, user.target, args=(arg,), kwargs=new_kwargs)
                     for arg in tensors
                 ]
                 new_cat = g.create_node(
