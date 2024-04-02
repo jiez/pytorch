@@ -47,7 +47,7 @@ from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     onlyCUDA, onlyCPU,
     dtypes, dtypesIfCUDA, dtypesIfCPU, deviceCountAtLeast,
-    skipMeta,
+    skipMeta, precisionOverride,
     PYTORCH_CUDA_MEMCHECK, largeTensorTest, onlyNativeDeviceTypes,
     get_all_device_types, skipXLA)
 from typing import Tuple
@@ -5932,10 +5932,13 @@ else:
         for optimizer_ctor in (torch.optim.SGD, torch.optim.Adam, torch.optim.AdamW):
             self._grad_scaling_autocast_test(device=device.type, optimizer_ctor=optimizer_ctor, optimizer_kwargs={"foreach": True})
 
-    @onlyCUDA
+    @onlyNativeDeviceTypes
     def test_grad_scaling_autocast_fused(self, device):
         device = torch.device(device)
         for optimizer_ctor in (torch.optim.Adam, torch.optim.AdamW):
+            if optimizer_ctor != torch.optim.Adam and device == torch.device('cpu'):
+                # TODO: haozhe, support AdamW
+                continue
             self._grad_scaling_autocast_test(device=device.type, optimizer_ctor=optimizer_ctor, optimizer_kwargs={"fused": True})
 
     # Make sure that the parameters become nonsense when scaled gradients are finite
@@ -5952,7 +5955,8 @@ else:
                 {"foreach": False, "fused": True},
             ),
         ):
-            if device.type != "cuda":
+            if device.type != "cuda" and optimizer_ctor.__name__ != "Adam":
+                # TODO: haozhe, support AdamW
                 optimizer_kwargs['fused'] = False
             with self.subTest(optimizer=optimizer_ctor, optimizer_kwargs=optimizer_kwargs):
                 self._test_grads_invalidated_between_unscale_and_step(device.type, optimizer_ctor, optimizer_kwargs)
@@ -5994,6 +5998,49 @@ else:
         scaler.step(optimizer)
         scaler.update()
         assert scaler._scale != float("inf") and scaler._scale != float("nan")
+
+    @onlyNativeDeviceTypes
+    @dtypes(*floating_types_and(torch.bfloat16, torch.half))
+    @precisionOverride({torch.half : 1e-4, torch.bfloat16 : 1e-4})
+    def test_fused_adam(self, device, dtype):
+        r"""
+        This testcase will compare the results between _single_tensor_adam and _fused_adam.
+        """
+        from torch.optim.adam import _single_tensor_adam, _fused_adam
+
+        def _test_fused_adam_base(kwargs):
+            non_fused_kwargs = copy.deepcopy(kwargs)
+            fused_kwargs = copy.deepcopy(kwargs)
+            _single_tensor_adam(**non_fused_kwargs)
+            _fused_adam(**fused_kwargs)
+            self.assertEqual(non_fused_kwargs, fused_kwargs)
+
+        # generate input args
+        TENSOR_SIZE = (33, )  # make sure to cover cpu vec and scalar
+        NPARAM = 3
+        kwargs = {}
+        kwargs['params'] = [torch.randn(TENSOR_SIZE, device=device, dtype=dtype) for _ in range(NPARAM)]
+        kwargs['grads'] = [torch.randn(TENSOR_SIZE, device=device, dtype=dtype) for _ in range(NPARAM)]
+        kwargs['exp_avgs'] = [torch.randn(TENSOR_SIZE, device=device, dtype=dtype) for _ in range(NPARAM)]
+        kwargs['exp_avg_sqs'] = [torch.randn(TENSOR_SIZE, device=device, dtype=dtype) for _ in range(NPARAM)]
+        kwargs['state_steps'] = [torch.tensor([10.0]) for _ in range(NPARAM)]
+        kwargs['grad_scale'] = None
+        kwargs['found_inf'] = None
+        kwargs['beta1'] = 0.9
+        kwargs['beta2'] = 0.999
+        kwargs['lr'] = 0.1
+        kwargs['eps'] = 1e-8
+        kwargs['has_complex'] = False
+        kwargs['capturable'] = False
+        kwargs['differentiable'] = False
+        for amsgrad, maximize, weight_decay in product([True, False], [True, False], [0.0, 0.1]):
+            kwargs['amsgrad'] = amsgrad
+            kwargs['maximize'] = maximize
+            kwargs['weight_decay'] = weight_decay
+            kwargs['max_exp_avg_sqs'] = []
+            if amsgrad:
+                kwargs['max_exp_avg_sqs'] = [torch.randn(TENSOR_SIZE, device=device, dtype=dtype) for _ in range(NPARAM)]
+            _test_fused_adam_base(kwargs)
 
     @onlyNativeDeviceTypes
     def test_grad_scaling_clipping(self, device):
