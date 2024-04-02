@@ -356,9 +356,7 @@ class FreeIfNotReusedLine(MemoryPlanningLine):
     is_reused: bool = False
 
     def plan(self, state: MemoryPlanningState) -> MemoryPlanningLine:
-        if len(self.node.get_inputs_that_alias_output()) > 0:
-            return self
-        if isinstance(self.node.layout, ir.MultiOutputLayout):
+        if isinstance(self.node.layout, (ir.AliasedLayout, ir.MultiOutputLayout)):
             return self
         assert not self.is_reused
         if self.node.get_name() in V.graph.removed_buffers:
@@ -1417,9 +1415,9 @@ class WrapperCodeGen(CodeGen):
             return
 
         layout = buffer.get_layout()
-        if isinstance(layout, ir.MutationLayoutSHOULDREMOVE):
+        if isinstance(layout, ir.MutationLayout):
             return
-        if isinstance(layout, ir.NonOwningLayout):
+        if isinstance(layout, ir.AliasedLayout):
             assert isinstance(
                 layout.view, ir.ReinterpretView
             ), f"unexpected {type(layout.view)}: {layout.view}"
