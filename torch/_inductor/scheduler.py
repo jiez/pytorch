@@ -96,7 +96,7 @@ class OutputNode:
     def is_reduction(self):
         return False
 
-    def get_inputs_that_alias_output(self):
+    def get_alias_names(self):
         return ()
 
     def get_name(self):
@@ -225,7 +225,7 @@ class BaseSchedulerNode:
         self.last_usage = used_buffers - future_used_buffers
 
     def get_aliases(self):
-        return self.node.get_inputs_that_alias_output()
+        return self.node.get_alias_names()
 
     def get_mutations(self):
         return self.node.get_mutation_names()
@@ -250,17 +250,14 @@ class BaseSchedulerNode:
     def used_or_aliased_buffer_names(self) -> Set[str]:
         used_names = set()
 
-        deps = [
-            dep.name
-            for dep in itertools.chain(self.read_writes.reads, self.read_writes.writes)
-        ]
-        while len(deps) > 0:
-            dep = deps.pop()
-            used_names.add(dep)
-            if V.graph.name_to_buffer.get(dep):
-                for alias in V.graph.name_to_buffer[dep].get_inputs_that_alias_output():
-                    if alias not in used_names:
-                        deps.append(alias)
+        for dep in itertools.chain(self.read_writes.reads, self.read_writes.writes):
+            used_names.add(dep.name)
+            if V.graph.name_to_buffer.get(dep.name):
+                layout = V.graph.name_to_buffer[dep.name].get_layout()
+                # needed to avoid deallocating aliased buffer
+                # if there are still uses of aliases ahead
+                if isinstance(layout, ir.AliasedLayout):
+                    used_names.add(layout.view.data.get_name())
         return used_names
 
     def prune_deps(self):
@@ -326,7 +323,7 @@ class BaseSchedulerNode:
             return
 
         if isinstance(self, (SchedulerNode,)) and (
-            self.node.get_inputs_that_alias_output() or self.node.get_mutation_names()
+            self.node.get_alias_names() or self.node.get_mutation_names()
         ):
             return
 
@@ -369,14 +366,15 @@ class BaseSchedulerNode:
                             input_node.node.get_layout(),
                             (
                                 ir.MultiOutputLayout,
-                                ir.MutationLayoutSHOULDREMOVE,
+                                ir.MutationLayout,
+                                ir.AliasedLayout,
                             ),
                         )
                         and not (
                             isinstance(
                                 input_node.node, (ir.FallbackKernel, ir.MultiOutput)
                             )
-                            and len(input_node.node.get_inputs_that_alias_output()) > 0
+                            and len(input_node.node.get_alias_names()) > 0
                         )
                         and buffer_reuse_key(input_node.node)
                         == buffer_reuse_key(self.node)
@@ -409,7 +407,7 @@ class BaseSchedulerNode:
             return
 
         if isinstance(self, (SchedulerNode,)) and (
-            self.node.get_inputs_that_alias_output() or self.node.get_mutation_names()
+            self.node.get_alias_names() or self.node.get_mutation_names()
         ):
             V.graph.wrapper_code.codegen_allocation(self.node)
             return
@@ -2398,24 +2396,23 @@ class Scheduler:
 
             self.enter_context(node)
 
-            # NOTE(yf225): suggest to remove this if check because it never hurts to do device_guard before NopKernelSchedulerNode.allocate() (which allocates CUDA buffer)
-            # if not isinstance(node, NopKernelSchedulerNode):
-            device = node.get_device()
-            if (
-                device != self.current_device
-                or node.is_extern()
-                or node.is_template()
-            ):
-                self.flush()
-            if device != self.current_device:
-                if device.type == "cuda":
-                    if self.current_device and self.current_device.type == "cuda":
+            if not isinstance(node, NopKernelSchedulerNode):
+                device = node.get_device()
+                if (
+                    device != self.current_device
+                    or node.is_extern()
+                    or node.is_template()
+                ):
+                    self.flush()
+                if device != self.current_device:
+                    if device.type == "cuda":
+                        if self.current_device and self.current_device.type == "cuda":
+                            V.graph.wrapper_code.codegen_device_guard_exit()
+                        assert device.index is not None, "device should have an index"
+                        V.graph.wrapper_code.codegen_device_guard_enter(device.index)
+                    elif self.current_device and self.current_device.type == "cuda":
                         V.graph.wrapper_code.codegen_device_guard_exit()
-                    assert device.index is not None, "device should have an index"
-                    V.graph.wrapper_code.codegen_device_guard_enter(device.index)
-                elif self.current_device and self.current_device.type == "cuda":
-                    V.graph.wrapper_code.codegen_device_guard_exit()
-                self.current_device = device
+                    self.current_device = device
 
             self.buffer_names_to_free.update(node.last_usage)
 
@@ -2458,7 +2455,7 @@ class Scheduler:
             return False
         node = self.name_to_node[buf_name]
         layout = node.node.get_layout()
-        if isinstance(layout, ir.NonOwningLayout):
+        if isinstance(layout, ir.AliasedLayout):
             return not layout.maybe_guard_aligned()
         else:
             return False
